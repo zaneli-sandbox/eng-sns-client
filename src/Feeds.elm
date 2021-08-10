@@ -1,8 +1,8 @@
 module Feeds exposing (Model, Msg(..), init, update, view)
 
-import Html exposing (Html, a, div, h2, li, section, span, text, ul)
-import Html.Attributes exposing (href)
-import Html.Events exposing (onMouseOver)
+import Html exposing (Html, a, button, div, h2, li, span, text, ul)
+import Html.Attributes exposing (disabled)
+import Html.Events exposing (onClick, onMouseOver)
 import Http
 import Json.Decode as Decode exposing (Decoder, int, list, string)
 import Json.Decode.Pipeline exposing (required)
@@ -15,7 +15,7 @@ import Users exposing (User, userDecoder)
 
 
 type alias Model =
-    { feeds : List Feed }
+    { feeds : List Feed, readableMore : Bool }
 
 
 type alias Feed =
@@ -29,7 +29,9 @@ type FeedUser
 
 init : ( Model, Cmd Msg )
 init =
-    ( { feeds = [] }, Http.get { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20", expect = Http.expectJson GotFeeds feedsDecoder } )
+    ( { feeds = [], readableMore = False }
+    , Http.get { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20", expect = Http.expectJson GotFeeds feedsDecoder }
+    )
 
 
 
@@ -38,6 +40,7 @@ init =
 
 type Msg
     = GotFeeds (Result Http.Error (List Feed))
+    | GetFeeds Int
     | GetUser FeedUser
     | GotUser String (Result Http.Error User)
 
@@ -45,10 +48,15 @@ type Msg
 update msg model =
     case msg of
         GotFeeds (Ok feeds) ->
-            ( { model | feeds = feeds }, Cmd.none )
+            ( { model | feeds = model.feeds ++ feeds, readableMore = True }, Cmd.none )
 
         GotFeeds (Err _) ->
             ( model, Cmd.none )
+
+        GetFeeds readed ->
+            ( { model | readableMore = False }
+            , Http.get { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20&$skip=" ++ String.fromInt readed, expect = Http.expectJson GotFeeds feedsDecoder }
+            )
 
         GetUser (UserId userId) ->
             ( model, Http.get { url = Routes.baseURL ++ "user/" ++ userId, expect = Http.expectJson (GotUser userId) Users.userDecoder } )
@@ -110,21 +118,23 @@ feedsDecoder =
 view : Model -> Html Msg
 view model =
     div []
-        [ ul [] (List.map viewFeed model.feeds) ]
+        [ ul [] (List.map viewFeed model.feeds)
+        , button [ disabled (not model.readableMore), onClick (GetFeeds (List.length model.feeds)) ] [ text "もっと読む" ]
+        ]
 
 
 viewFeed feed =
-    li [ onMouseOver (GetUser feed.user) ] ([ div [] [ text feed.text ], div [] [ text feed.createdAt ] ] ++ viewUser feed.user)
+    li [ onMouseOver (GetUser feed.user) ] [ div [] [ text (feed.text ++ viewUser feed.user) ], div [] [ text feed.createdAt ] ]
 
 
-viewUser : FeedUser -> List (Html msg)
+viewUser : FeedUser -> String
 viewUser user =
     case user of
         UserData (Just data) ->
-            [ div [] [ text data.name ] ]
+            "(@" ++ data.name ++ ")"
 
         UserData Nothing ->
-            [ div [] [ text "匿名ユーザー" ] ]
+            "(@匿名ユーザー)"
 
         UserId userId ->
-            []
+            ""

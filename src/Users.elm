@@ -1,8 +1,8 @@
 module Users exposing (Model, Msg(..), User, init, update, userDecoder, view)
 
-import Html exposing (Html, a, div, h2, li, section, span, text, ul)
-import Html.Attributes exposing (href)
-import Html.Events exposing (onMouseOver)
+import Html exposing (Html, a, button, div, h2, li, span, text, ul)
+import Html.Attributes exposing (disabled)
+import Html.Events exposing (onClick)
 import Http
 import Json.Decode as Decode exposing (Decoder, int, list, string)
 import Json.Decode.Pipeline exposing (required)
@@ -14,7 +14,7 @@ import Routes exposing (baseURL)
 
 
 type alias Model =
-    { users : List User }
+    { users : List User, readableMore : Bool }
 
 
 type alias User =
@@ -23,7 +23,9 @@ type alias User =
 
 init : ( Model, Cmd Msg )
 init =
-    ( { users = [] }, Http.get { url = Routes.baseURL ++ "user/all?$orderby=_created_at%20desc&$limit=20", expect = Http.expectJson GotUsers usersDecoder } )
+    ( { users = [], readableMore = False }
+    , Http.get { url = Routes.baseURL ++ "user/all?$orderby=_created_at%20desc&$limit=20&", expect = Http.expectJson GotUsers usersDecoder }
+    )
 
 
 
@@ -32,15 +34,21 @@ init =
 
 type Msg
     = GotUsers (Result Http.Error (List User))
+    | GetUsers Int
 
 
 update msg model =
     case msg of
         GotUsers (Ok users) ->
-            ( { model | users = users }, Cmd.none )
+            ( { model | users = model.users ++ users, readableMore = True }, Cmd.none )
 
         GotUsers (Err _) ->
             ( model, Cmd.none )
+
+        GetUsers readed ->
+            ( { model | readableMore = False }
+            , Http.get { url = Routes.baseURL ++ "user/all?$orderby=_created_at%20desc&$limit=20&$skip=" ++ String.fromInt readed, expect = Http.expectJson GotUsers usersDecoder }
+            )
 
 
 usersDecoder : Decoder (List User)
@@ -60,12 +68,13 @@ userDecoder =
 view : Model -> Html Msg
 view model =
     div []
-        [ ul [] (List.map viewUser model.users) ]
+        [ ul [] (List.map viewUser model.users)
+        , button [ disabled (not model.readableMore), onClick (GetUsers (List.length model.users)) ] [ text "もっと読む" ]
+        ]
 
 
 viewUser user =
     li []
-        [ div [] [ text user.id ]
-        , div [] [ text user.name ]
+        [ div [] [ text user.name ]
         , div [] [ text user.description ]
         ]
