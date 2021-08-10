@@ -1,8 +1,13 @@
 module Main exposing (Model, Msg(..), init, main, update, view)
 
-import Browser
+import Browser exposing (Document, UrlRequest)
+import Browser.Navigation as Navigation
 import Feeds
-import Html exposing (Html, a, aside, div, li, section, text, ul)
+import Html exposing (Html, a, aside, div, h2, li, section, span, text, ul)
+import Html.Attributes exposing (href)
+import Routes
+import Url exposing (Url)
+import Users
 
 
 
@@ -10,20 +15,22 @@ import Html exposing (Html, a, aside, div, li, section, text, ul)
 
 
 type alias Model =
-    { page : Page }
+    { page : Page, navKey : Navigation.Key }
 
 
-init : ( Model, Cmd Msg )
-init =
-    let
-        ( feedsInit, feedsCmd ) =
-            Feeds.init
-    in
-    ( { page = Feeds feedsInit }, Cmd.map FeedsMsg feedsCmd )
+init : Url -> Navigation.Key -> ( Model, Cmd Msg )
+init url navKey =
+    setNewPage (Routes.match url) (initialModel navKey)
 
 
 type Page
     = Feeds Feeds.Model
+    | Users Users.Model
+    | NotFound
+
+
+initialModel navKey =
+    { page = NotFound, navKey = navKey }
 
 
 
@@ -32,6 +39,9 @@ type Page
 
 type Msg
     = FeedsMsg Feeds.Msg
+    | UsersMsg Users.Msg
+    | NewRoute (Maybe Routes.Route)
+    | Visit UrlRequest
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -44,16 +54,75 @@ update msg model =
             in
             ( { model | page = Feeds updatedFeedsModel }, Cmd.map FeedsMsg feedsCmd )
 
+        ( UsersMsg usersMsg, Users usersModel ) ->
+            let
+                ( updatedUsersModel, usersCmd ) =
+                    Users.update usersMsg usersModel
+            in
+            ( { model | page = Users updatedUsersModel }, Cmd.map UsersMsg usersCmd )
+
+        ( NewRoute route, _ ) ->
+            setNewPage route model
+
+        ( Visit (Browser.Internal url), _ ) ->
+            ( model, Navigation.pushUrl model.navKey (Url.toString url) )
+
+        _ ->
+            ( model, Cmd.none )
+
+
+setNewPage : Maybe Routes.Route -> Model -> ( Model, Cmd Msg )
+setNewPage route model =
+    case route of
+        Just Routes.Feeds ->
+            let
+                ( feedsInit, feedsCmd ) =
+                    Feeds.init
+            in
+            ( { model | page = Feeds feedsInit }, Cmd.map FeedsMsg feedsCmd )
+
+        Just Routes.Users ->
+            let
+                ( usersInit, usersCmd ) =
+                    Users.init
+            in
+            ( { model | page = Users usersInit }, Cmd.map UsersMsg usersCmd )
+
+        Nothing ->
+            ( { model | page = NotFound }, Cmd.none )
+
 
 
 ---- VIEW ----
 
 
-view : Model -> Html Msg
+view : Model -> Document Msg
 view model =
     case model.page of
         Feeds feedsModel ->
-            Feeds.view feedsModel |> Html.map FeedsMsg
+            let
+                content =
+                    Feeds.view feedsModel |> Html.map FeedsMsg
+            in
+            { title = "つぶやき一覧", body = [ viewHeader, content ] }
+
+        Users usersModel ->
+            let
+                content =
+                    Users.view usersModel |> Html.map UsersMsg
+            in
+            { title = "ユーザー一覧", body = [ viewHeader, content ] }
+
+        NotFound ->
+            { title = "ページが見つかりません", body = [ viewHeader, text "ページが見つかりません" ] }
+
+
+viewHeader =
+    h2 []
+        [ span [] [ a [ Routes.href Routes.Feeds ] [ text "つぶやき一覧" ] ]
+        , span [] [ text "\u{00A0}" ]
+        , span [] [ a [ Routes.href Routes.Users ] [ text "ユーザー一覧" ] ]
+        ]
 
 
 
@@ -62,9 +131,11 @@ view model =
 
 main : Program () Model Msg
 main =
-    Browser.element
+    Browser.application
         { view = view
         , init = \_ -> init
         , update = update
         , subscriptions = always Sub.none
+        , onUrlRequest = Visit
+        , onUrlChange = Routes.match >> NewRoute
         }

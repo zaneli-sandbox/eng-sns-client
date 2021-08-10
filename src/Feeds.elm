@@ -1,19 +1,17 @@
 module Feeds exposing (Model, Msg(..), init, update, view)
 
-import Debug
-import Html exposing (Html, a, div, h2, li, section, text, ul)
+import Html exposing (Html, a, div, h2, li, section, span, text, ul)
+import Html.Attributes exposing (href)
 import Html.Events exposing (onMouseOver)
 import Http
 import Json.Decode as Decode exposing (Decoder, int, list, string)
 import Json.Decode.Pipeline exposing (required)
+import Routes exposing (baseURL)
+import Users exposing (User, userDecoder)
 
 
 
 ---- MODEL ----
-
-
-baseURL =
-    "https://versatileapi.herokuapp.com/api/"
 
 
 type alias Model =
@@ -29,13 +27,9 @@ type FeedUser
     | UserData (Maybe User)
 
 
-type alias User =
-    { id : String, name : String, description : String }
-
-
 init : ( Model, Cmd Msg )
 init =
-    ( { feeds = [] }, Http.get { url = baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20", expect = Http.expectJson GotFeeds feedDecoder } )
+    ( { feeds = [] }, Http.get { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20", expect = Http.expectJson GotFeeds feedsDecoder } )
 
 
 
@@ -57,7 +51,7 @@ update msg model =
             ( model, Cmd.none )
 
         GetUser (UserId userId) ->
-            ( model, Http.get { url = baseURL ++ "user/" ++ userId, expect = Http.expectJson (GotUser userId) userDecoder } )
+            ( model, Http.get { url = Routes.baseURL ++ "user/" ++ userId, expect = Http.expectJson (GotUser userId) Users.userDecoder } )
 
         GetUser (UserData user) ->
             ( model, Cmd.none )
@@ -100,18 +94,13 @@ replaceAnonymousFeedUser feedUser anonymousUserId =
             feedUser
 
 
-feedDecoder : Decoder (List Feed)
-feedDecoder =
+feedsDecoder : Decoder (List Feed)
+feedsDecoder =
     let
         toFeed text createdAt userId =
             Feed text createdAt (UserId userId)
     in
     list (Decode.succeed toFeed |> required "text" string |> required "_created_at" string |> required "_user_id" string)
-
-
-userDecoder : Decoder User
-userDecoder =
-    Decode.succeed User |> required "id" string |> required "name" string |> required "description" string
 
 
 
@@ -121,9 +110,11 @@ userDecoder =
 view : Model -> Html Msg
 view model =
     div []
-        [ h2 [] [ text "つぶやき一覧" ]
-        , ul [] (List.map (\feed -> li [ onMouseOver (GetUser feed.user) ] ([ div [] [ text feed.text ], div [] [ text feed.createdAt ] ] ++ viewUser feed.user)) model.feeds)
-        ]
+        [ ul [] (List.map viewFeed model.feeds) ]
+
+
+viewFeed feed =
+    li [ onMouseOver (GetUser feed.user) ] ([ div [] [ text feed.text ], div [] [ text feed.createdAt ] ] ++ viewUser feed.user)
 
 
 viewUser : FeedUser -> List (Html msg)
