@@ -1,7 +1,7 @@
 module Feeds exposing (Model, Msg(..), init, update, view)
 
 import Html exposing (Html, a, button, div, h2, li, span, text, ul)
-import Html.Attributes exposing (disabled)
+import Html.Attributes exposing (disabled, href)
 import Html.Events exposing (onClick, onMouseOver)
 import Http
 import Json.Decode as Decode exposing (Decoder, int, list, string)
@@ -15,7 +15,7 @@ import Users exposing (User, userDecoder)
 
 
 type alias Model =
-    { feeds : List Feed, readableMore : Bool }
+    { feeds : List Feed, userId : Maybe String, readableMore : Bool, notFound : Bool }
 
 
 type alias Feed =
@@ -27,10 +27,13 @@ type FeedUser
     | UserData (Maybe User)
 
 
-init : ( Model, Cmd Msg )
-init =
-    ( { feeds = [], readableMore = False }
-    , Http.get { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20", expect = Http.expectJson GotFeeds feedsDecoder }
+init : Maybe String -> ( Model, Cmd Msg )
+init userId =
+    ( { feeds = [], userId = userId, readableMore = False, notFound = False }
+    , Http.get
+        { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20" ++ toFilterUserIdQuery userId
+        , expect = Http.expectJson GotFeeds feedsDecoder
+        }
     )
 
 
@@ -50,12 +53,22 @@ update msg model =
         GotFeeds (Ok feeds) ->
             ( { model | feeds = model.feeds ++ feeds, readableMore = True }, Cmd.none )
 
+        GotFeeds (Err (Http.BadStatus 404)) ->
+            if List.isEmpty model.feeds then
+                ( { model | notFound = True }, Cmd.none )
+
+            else
+                ( model, Cmd.none )
+
         GotFeeds (Err _) ->
             ( model, Cmd.none )
 
         GetFeeds readed ->
             ( { model | readableMore = False }
-            , Http.get { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20&$skip=" ++ String.fromInt readed, expect = Http.expectJson GotFeeds feedsDecoder }
+            , Http.get
+                { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20&$skip=" ++ String.fromInt readed ++ toFilterUserIdQuery model.userId
+                , expect = Http.expectJson GotFeeds feedsDecoder
+                }
             )
 
         GetUser (UserId userId) ->
@@ -111,6 +124,15 @@ feedsDecoder =
     list (Decode.succeed toFeed |> required "text" string |> required "_created_at" string |> required "_user_id" string)
 
 
+toFilterUserIdQuery userId =
+    case userId of
+        Just id ->
+            "&$filter=_user_id%20eq%20'" ++ id ++ "'"
+
+        Nothing ->
+            ""
+
+
 
 ---- VIEW ----
 
@@ -124,17 +146,17 @@ view model =
 
 
 viewFeed feed =
-    li [ onMouseOver (GetUser feed.user) ] [ div [] [ text (feed.text ++ viewUser feed.user) ], div [] [ text feed.createdAt ] ]
+    li [ onMouseOver (GetUser feed.user) ] [ div [] [ text feed.text, viewUser feed.user ], div [] [ text feed.createdAt ] ]
 
 
-viewUser : FeedUser -> String
+viewUser : FeedUser -> Html Msg
 viewUser user =
     case user of
         UserData (Just data) ->
-            "(@" ++ data.name ++ ")"
+            a [ Routes.href (Routes.UserFeeds data.id) ] [ text ("(@" ++ data.name ++ ")") ]
 
         UserData Nothing ->
-            "(@匿名ユーザー)"
+            text "(@匿名ユーザー)"
 
         UserId userId ->
-            ""
+            text ""

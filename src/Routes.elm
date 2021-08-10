@@ -3,11 +3,12 @@ module Routes exposing (Route(..), baseURL, href, match)
 import Html
 import Html.Attributes
 import Url exposing (Url)
-import Url.Parser as Parser exposing (Parser)
+import Url.Parser as Parser exposing ((</>), Parser)
 
 
 type Route
-    = Feeds
+    = AllFeeds
+    | UserFeeds String
     | Users
 
 
@@ -17,7 +18,12 @@ baseURL =
 
 routes : Parser (Route -> a) a
 routes =
-    Parser.oneOf [ Parser.map Feeds Parser.top, Parser.map Feeds (Parser.s "feeds"), Parser.map Users (Parser.s "users") ]
+    Parser.oneOf
+        [ Parser.map AllFeeds Parser.top
+        , Parser.map AllFeeds (Parser.s "feeds")
+        , Parser.map UserFeeds (Parser.s "feeds" </> Parser.string)
+        , Parser.map Users (Parser.s "users")
+        ]
 
 
 match : Url -> Maybe Route
@@ -28,8 +34,11 @@ match url =
 routeToUrl : Route -> String
 routeToUrl route =
     case route of
-        Feeds ->
+        AllFeeds ->
             "/feeds"
+
+        UserFeeds userId ->
+            "/feeds/" ++ userId
 
         Users ->
             "/users"

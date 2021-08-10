@@ -74,10 +74,17 @@ update msg model =
 setNewPage : Maybe Routes.Route -> Model -> ( Model, Cmd Msg )
 setNewPage route model =
     case route of
-        Just Routes.Feeds ->
+        Just Routes.AllFeeds ->
             let
                 ( feedsInit, feedsCmd ) =
-                    Feeds.init
+                    Feeds.init Nothing
+            in
+            ( { model | page = Feeds feedsInit }, Cmd.map FeedsMsg feedsCmd )
+
+        Just (Routes.UserFeeds userId) ->
+            let
+                ( feedsInit, feedsCmd ) =
+                    Feeds.init (Just userId)
             in
             ( { model | page = Feeds feedsInit }, Cmd.map FeedsMsg feedsCmd )
 
@@ -100,11 +107,15 @@ view : Model -> Document Msg
 view model =
     case model.page of
         Feeds feedsModel ->
-            let
-                content =
-                    Feeds.view feedsModel |> Html.map FeedsMsg
-            in
-            { title = "つぶやき一覧", body = [ viewHeader, content ] }
+            if feedsModel.notFound then
+                { title = "ページが見つかりません", body = [ viewHeader, text "ページが見つかりません" ] }
+
+            else
+                let
+                    content =
+                        Feeds.view feedsModel |> Html.map FeedsMsg
+                in
+                { title = "つぶやき一覧", body = [ viewHeader, content ] }
 
         Users usersModel ->
             let
@@ -119,7 +130,7 @@ view model =
 
 viewHeader =
     h2 []
-        [ span [] [ a [ Routes.href Routes.Feeds ] [ text "つぶやき一覧" ] ]
+        [ span [] [ a [ Routes.href Routes.AllFeeds ] [ text "つぶやき一覧" ] ]
         , span [] [ text "\u{00A0}" ]
         , span [] [ a [ Routes.href Routes.Users ] [ text "ユーザー一覧" ] ]
         ]

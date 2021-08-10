@@ -75,6 +75,6 @@ view model =
 
 viewUser user =
     li []
-        [ div [] [ text user.name ]
+        [ div [] [ a [ Routes.href (Routes.UserFeeds user.id) ] [ text user.name ] ]
         , div [] [ text user.description ]
         ]
