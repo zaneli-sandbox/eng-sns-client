@@ -115,14 +115,14 @@ view model =
                     content =
                         Feeds.view feedsModel |> Html.map FeedsMsg
                 in
-                { title = "つぶやき一覧", body = [ viewHeader, content ] }
+                { title = Feeds.title feedsModel, body = [ viewHeader, content ] }
 
         Users usersModel ->
             let
                 content =
                     Users.view usersModel |> Html.map UsersMsg
             in
-            { title = "ユーザー一覧", body = [ viewHeader, content ] }
+            { title = Users.title, body = [ viewHeader, content ] }
 
         NotFound ->
             { title = "ページが見つかりません", body = [ viewHeader, text "ページが見つかりません" ] }

@@ -1,4 +1,4 @@
-module Feeds exposing (Model, Msg(..), init, update, view)
+module Feeds exposing (Model, Msg(..), init, title, update, view)
 
 import Html exposing (Html, a, button, div, h2, li, span, text, ul)
 import Html.Attributes exposing (disabled, href)
@@ -15,7 +15,7 @@ import Users exposing (User, userDecoder)
 
 
 type alias Model =
-    { feeds : List Feed, userId : Maybe String, readableMore : Bool, notFound : Bool }
+    { feeds : List Feed, user : Maybe FeedUser, readableMore : Bool, notFound : Bool }
 
 
 type alias Feed =
@@ -29,11 +29,18 @@ type FeedUser
 
 init : Maybe String -> ( Model, Cmd Msg )
 init userId =
-    ( { feeds = [], userId = userId, readableMore = False, notFound = False }
-    , Http.get
-        { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20" ++ toFilterUserIdQuery userId
-        , expect = Http.expectJson GotFeeds feedsDecoder
-        }
+    let
+        user =
+            Maybe.map UserId userId
+    in
+    ( { feeds = [], user = user, readableMore = False, notFound = False }
+    , Cmd.batch
+        [ Http.get
+            { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20" ++ toFilterUserIdQuery user
+            , expect = Http.expectJson GotFeeds feedsDecoder
+            }
+        , getUser user
+        ]
     )
 
 
@@ -48,6 +55,7 @@ type Msg
     | GotUser String (Result Http.Error User)
 
 
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         GotFeeds (Ok feeds) ->
@@ -66,19 +74,16 @@ update msg model =
         GetFeeds readed ->
             ( { model | readableMore = False }
             , Http.get
-                { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20&$skip=" ++ String.fromInt readed ++ toFilterUserIdQuery model.userId
+                { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20&$skip=" ++ String.fromInt readed ++ toFilterUserIdQuery model.user
                 , expect = Http.expectJson GotFeeds feedsDecoder
                 }
             )
 
-        GetUser (UserId userId) ->
-            ( model, Http.get { url = Routes.baseURL ++ "user/" ++ userId, expect = Http.expectJson (GotUser userId) Users.userDecoder } )
-
-        GetUser (UserData user) ->
-            ( model, Cmd.none )
+        GetUser user ->
+            ( model, getUser (Just user) )
 
         GotUser _ (Ok user) ->
-            ( { model | feeds = List.map (\feed -> { feed | user = replaceFeedUser feed.user user }) model.feeds }, Cmd.none )
+            ( { model | feeds = List.map (\feed -> { feed | user = replaceFeedUser feed.user user }) model.feeds, user = Maybe.map (\u -> replaceFeedUser u user) model.user }, Cmd.none )
 
         GotUser userId (Err (Http.BadStatus 404)) ->
             ( { model | feeds = List.map (\feed -> { feed | user = replaceAnonymousFeedUser feed.user userId }) model.feeds }, Cmd.none )
@@ -124,13 +129,27 @@ feedsDecoder =
     list (Decode.succeed toFeed |> required "text" string |> required "_created_at" string |> required "_user_id" string)
 
 
-toFilterUserIdQuery userId =
-    case userId of
-        Just id ->
-            "&$filter=_user_id%20eq%20'" ++ id ++ "'"
+toFilterUserIdQuery : Maybe FeedUser -> String
+toFilterUserIdQuery user =
+    case user of
+        Just (UserId userId) ->
+            "&$filter=_user_id%20eq%20'" ++ userId ++ "'"
 
-        Nothing ->
+        Just (UserData (Just data)) ->
+            "&$filter=_user_id%20eq%20'" ++ data.id ++ "'"
+
+        _ ->
             ""
+
+
+getUser : Maybe FeedUser -> Cmd Msg
+getUser user =
+    case user of
+        Just (UserId userId) ->
+            Http.get { url = Routes.baseURL ++ "user/" ++ userId, expect = Http.expectJson (GotUser userId) Users.userDecoder }
+
+        _ ->
+            Cmd.none
 
 
 
@@ -140,11 +159,13 @@ toFilterUserIdQuery userId =
 view : Model -> Html Msg
 view model =
     div []
-        [ ul [] (List.map viewFeed model.feeds)
+        [ h2 [] [ text (title model) ]
+        , ul [] (List.map viewFeed model.feeds)
         , button [ disabled (not model.readableMore), onClick (GetFeeds (List.length model.feeds)) ] [ text "もっと読む" ]
         ]
 
 
+viewFeed : Feed -> Html Msg
 viewFeed feed =
     li [ onMouseOver (GetUser feed.user) ] [ div [] [ text feed.text, viewUser feed.user ], div [] [ text feed.createdAt ] ]
 
@@ -160,3 +181,13 @@ viewUser user =
 
         UserId userId ->
             text ""
+
+
+title : Model -> String
+title model =
+    case model.user of
+        Just (UserData (Just data)) ->
+            data.name ++ "のつぶやき一覧"
+
+        _ ->
+            "つぶやき一覧"

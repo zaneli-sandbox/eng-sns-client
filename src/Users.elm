@@ -1,4 +1,4 @@
-module Users exposing (Model, Msg(..), User, init, update, userDecoder, view)
+module Users exposing (Model, Msg(..), User, init, title, update, userDecoder, view)
 
 import Html exposing (Html, a, button, div, h2, li, span, text, ul)
 import Html.Attributes exposing (disabled)
@@ -68,7 +68,8 @@ userDecoder =
 view : Model -> Html Msg
 view model =
     div []
-        [ ul [] (List.map viewUser model.users)
+        [ h2 [] [ text title ]
+        , ul [] (List.map viewUser model.users)
         , button [ disabled (not model.readableMore), onClick (GetUsers (List.length model.users)) ] [ text "もっと読む" ]
         ]
 
@@ -78,3 +79,7 @@ viewUser user =
         [ div [] [ a [ Routes.href (Routes.UserFeeds user.id) ] [ text user.name ] ]
         , div [] [ text user.description ]
         ]
+
+
+title =
+    "ユーザー一覧"
