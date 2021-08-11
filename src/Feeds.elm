@@ -35,10 +35,7 @@ init userId =
     in
     ( { feeds = [], user = user, readableMore = False, notFound = False }
     , Cmd.batch
-        [ Http.get
-            { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20" ++ toFilterUserIdQuery user
-            , expect = Http.expectJson GotFeeds feedsDecoder
-            }
+        [ getFeeds user Nothing
         , getUser user
         ]
     )
@@ -73,10 +70,7 @@ update msg model =
 
         GetFeeds readed ->
             ( { model | readableMore = False }
-            , Http.get
-                { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20&$skip=" ++ String.fromInt readed ++ toFilterUserIdQuery model.user
-                , expect = Http.expectJson GotFeeds feedsDecoder
-                }
+            , getFeeds model.user (Just readed)
             )
 
         GetUser user ->
@@ -142,6 +136,23 @@ toFilterUserIdQuery user =
             ""
 
 
+getFeeds : Maybe FeedUser -> Maybe Int -> Cmd Msg
+getFeeds user readed =
+    let
+        skip =
+            case readed of
+                Just num ->
+                    "&$skip=" ++ String.fromInt num
+
+                Nothing ->
+                    ""
+    in
+    Http.get
+        { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20" ++ skip ++ toFilterUserIdQuery user
+        , expect = Http.expectJson GotFeeds feedsDecoder
+        }
+
+
 getUser : Maybe FeedUser -> Cmd Msg
 getUser user =
     case user of
@@ -161,7 +172,7 @@ view model =
     div []
         [ h2 [] [ text (title model) ]
         , ul [] (List.map viewFeed model.feeds)
-        , button [ disabled (not model.readableMore), onClick (GetFeeds (List.length model.feeds)) ] [ text "もっと読む" ]
+        , button [ disabled (not model.readableMore), onClick (List.length model.feeds |> GetFeeds) ] [ text "もっと読む" ]
         ]
 
 
@@ -174,7 +185,7 @@ viewUser : FeedUser -> Html Msg
 viewUser user =
     case user of
         UserData (Just data) ->
-            a [ Routes.href (Routes.UserFeeds data.id) ] [ text ("(@" ++ data.name ++ ")") ]
+            a [ Routes.UserFeeds data.id |> Routes.href ] [ text ("(@" ++ data.name ++ ")") ]
 
         UserData Nothing ->
             text "(@匿名ユーザー)"

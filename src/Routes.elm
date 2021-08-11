@@ -46,4 +46,4 @@ routeToUrl route =
 
 href : Route -> Html.Attribute msg
 href route =
-    Html.Attributes.href (routeToUrl route)
+    routeToUrl route |> Html.Attributes.href

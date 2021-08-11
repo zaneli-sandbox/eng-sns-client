@@ -24,7 +24,7 @@ type alias User =
 init : ( Model, Cmd Msg )
 init =
     ( { users = [], readableMore = False }
-    , Http.get { url = Routes.baseURL ++ "user/all?$orderby=_created_at%20desc&$limit=20&", expect = Http.expectJson GotUsers usersDecoder }
+    , getUsers Nothing
     )
 
 
@@ -37,6 +37,7 @@ type Msg
     | GetUsers Int
 
 
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         GotUsers (Ok users) ->
@@ -47,7 +48,7 @@ update msg model =
 
         GetUsers readed ->
             ( { model | readableMore = False }
-            , Http.get { url = Routes.baseURL ++ "user/all?$orderby=_created_at%20desc&$limit=20&$skip=" ++ String.fromInt readed, expect = Http.expectJson GotUsers usersDecoder }
+            , getUsers (Just readed)
             )
 
 
@@ -61,6 +62,23 @@ userDecoder =
     Decode.succeed User |> required "id" string |> required "name" string |> required "description" string
 
 
+getUsers : Maybe Int -> Cmd Msg
+getUsers readed =
+    let
+        skip =
+            case readed of
+                Just num ->
+                    "&$skip=" ++ String.fromInt num
+
+                Nothing ->
+                    ""
+    in
+    Http.get
+        { url = Routes.baseURL ++ "user/all?$orderby=_created_at%20desc&$limit=20" ++ skip
+        , expect = Http.expectJson GotUsers usersDecoder
+        }
+
+
 
 ---- VIEW ----
 
@@ -70,16 +88,18 @@ view model =
     div []
         [ h2 [] [ text title ]
         , ul [] (List.map viewUser model.users)
-        , button [ disabled (not model.readableMore), onClick (GetUsers (List.length model.users)) ] [ text "もっと読む" ]
+        , button [ disabled (not model.readableMore), onClick (List.length model.users |> GetUsers) ] [ text "もっと読む" ]
         ]
 
 
+viewUser : User -> Html Msg
 viewUser user =
     li []
-        [ div [] [ a [ Routes.href (Routes.UserFeeds user.id) ] [ text user.name ] ]
+        [ div [] [ a [ Routes.UserFeeds user.id |> Routes.href ] [ text user.name ] ]
         , div [] [ text user.description ]
         ]
 
 
+title : String
 title =
     "ユーザー一覧"
