@@ -1,4 +1,4 @@
-module Users exposing (Model, Msg(..), User, init, title, update, userDecoder, view)
+module Users exposing (Model, Msg(..), User, anonymous, init, pageTitle, update, userDecoder, view)
 
 import Html exposing (Html, a, button, div, h2, li, span, text, ul)
 import Html.Attributes exposing (disabled)
@@ -26,6 +26,11 @@ init =
     ( { users = [], readableMore = False }
     , getUsers Nothing
     )
+
+
+anonymous : String -> User
+anonymous userId =
+    { id = userId, name = "匿名ユーザー", description = "" }
 
 
 
@@ -86,7 +91,7 @@ getUsers readed =
 view : Model -> Html Msg
 view model =
     div []
-        [ h2 [] [ text title ]
+        [ h2 [] [ text pageTitle ]
         , ul [] (List.map viewUser model.users)
         , button [ disabled <| not model.readableMore, onClick (List.length model.users |> GetUsers) ] [ text "もっと読む" ]
         ]
@@ -100,6 +105,6 @@ viewUser user =
         ]
 
 
-title : String
-title =
+pageTitle : String
+pageTitle =
     "ユーザー一覧"

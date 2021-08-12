@@ -1,17 +1,17 @@
-module Feeds exposing (Model, Msg(..), init, title, update, view)
+module Feeds exposing (Model, Msg(..), init, pageTitle, update, view)
 
 import Dict exposing (Dict)
 import Html exposing (Html, a, button, div, h2, li, span, text, ul)
-import Html.Attributes exposing (disabled, href)
+import Html.Attributes exposing (disabled, href, title)
 import Html.Events exposing (onClick, onMouseOver)
-import Html.Lazy exposing (lazy, lazy2)
+import Html.Lazy exposing (lazy, lazy4)
 import Http
 import Iso8601
 import Json.Decode as Decode exposing (Decoder, int, list, string)
-import Json.Decode.Pipeline exposing (required)
+import Json.Decode.Pipeline exposing (optional, required)
 import Routes exposing (baseURL)
 import Time
-import Users exposing (User, userDecoder)
+import Users exposing (User, anonymous, userDecoder)
 
 
 
@@ -19,8 +19,9 @@ import Users exposing (User, userDecoder)
 
 
 type alias Model =
-    { feeds : List Feed
-    , user : Maybe FeedUser
+    { feeds : List Text
+    , userId : Maybe String
+    , texts : Dict String Text
     , users : Dict String User
     , timeZone : Time.Zone
     , readableMore : Bool
@@ -28,28 +29,21 @@ type alias Model =
     }
 
 
-type alias Feed =
-    { text : String
+type alias Text =
+    { id : String
+    , text : String
     , createdAt : Time.Posix
-    , user : FeedUser
+    , userId : String
+    , replyTo : Maybe String
     }
-
-
-type FeedUser
-    = UserId String
-    | UserData (Maybe User)
 
 
 init : Time.Zone -> Maybe String -> ( Model, Cmd Msg )
 init timeZone userId =
-    let
-        user =
-            Maybe.map UserId userId
-    in
-    ( { feeds = [], user = user, users = Dict.empty, timeZone = timeZone, readableMore = False, notFound = False }
+    ( { feeds = [], userId = userId, texts = Dict.empty, users = Dict.empty, timeZone = timeZone, readableMore = False, notFound = False }
     , Cmd.batch
-        [ getFeeds user Nothing
-        , getUser user
+        [ getFeeds userId Nothing
+        , getUser userId
         ]
     )
 
@@ -59,9 +53,11 @@ init timeZone userId =
 
 
 type Msg
-    = GotFeeds (Result Http.Error (List Feed))
+    = GotFeeds (Result Http.Error (List Text))
     | GetFeeds Int
-    | GetUser FeedUser
+    | GotFeed (Result Http.Error Text)
+    | GetFeed String
+    | GetUser String
     | GotUser String (Result Http.Error User)
 
 
@@ -69,7 +65,7 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         GotFeeds (Ok feeds) ->
-            ( { model | feeds = model.feeds ++ replaceFeedUsers feeds model.users, readableMore = True }, Cmd.none )
+            ( { model | feeds = model.feeds ++ feeds, readableMore = True }, Cmd.none )
 
         GotFeeds (Err (Http.BadStatus 404)) ->
             if List.isEmpty model.feeds then
@@ -83,103 +79,66 @@ update msg model =
 
         GetFeeds readed ->
             ( { model | readableMore = False }
-            , getFeeds model.user <| Just readed
+            , getFeeds model.userId <| Just readed
             )
 
-        GetUser user ->
-            let
-                updatedModel =
-                    case getCachedUser model.users user of
-                        Just cachedUser ->
-                            { model | feeds = List.map (\feed -> { feed | user = replaceFeedUser feed.user cachedUser }) model.feeds }
+        GotFeed (Ok text) ->
+            ( { model | texts = Dict.insert text.id text model.texts }, Cmd.none )
 
-                        Nothing ->
-                            model
-            in
-            ( updatedModel, getUser (Just user) )
+        GotFeed (Err _) ->
+            ( model, Cmd.none )
+
+        GetFeed textId ->
+            ( model
+            , Http.get
+                { url = Routes.baseURL ++ "text/" ++ textId
+                , expect = Http.expectJson GotFeed textDecoder
+                }
+            )
+
+        GetUser userId ->
+            ( model, getUser (Just userId) )
 
         GotUser _ (Ok user) ->
             ( { model
-                | feeds = List.map (\feed -> { feed | user = replaceFeedUser feed.user user }) model.feeds
-                , user = Maybe.map (\u -> replaceFeedUser u user) model.user
-                , users = Dict.insert user.id user model.users
+                | users = Dict.insert user.id user model.users
               }
             , Cmd.none
             )
 
         GotUser userId (Err (Http.BadStatus 404)) ->
-            ( { model | feeds = List.map (\feed -> { feed | user = replaceAnonymousFeedUser feed.user userId }) model.feeds }, Cmd.none )
+            ( { model | users = Dict.insert userId (anonymous userId) model.users }, Cmd.none )
 
         GotUser _ (Err _) ->
             ( model, Cmd.none )
 
 
-replaceFeedUser : FeedUser -> User -> FeedUser
-replaceFeedUser feedUser user =
-    case feedUser of
-        UserId userId ->
-            if userId == user.id then
-                UserData (Just user)
-
-            else
-                UserId userId
-
-        UserData _ ->
-            feedUser
+textsDecoder : Decoder (List Text)
+textsDecoder =
+    list textDecoder
 
 
-replaceFeedUsers : List Feed -> Dict String User -> List Feed
-replaceFeedUsers feeds users =
+textDecoder : Decoder Text
+textDecoder =
     let
-        getUserFromDict feed =
-            case feed.user of
-                UserId userId ->
-                    Dict.get userId users |> Maybe.map (\u -> UserData (Just u))
+        toText id text createdAt userId replyTo =
+            case replyTo of
+                "" ->
+                    Text id text createdAt userId Nothing
 
-                _ ->
-                    Nothing
+                textId ->
+                    Text id text createdAt userId (Just textId)
     in
-    List.map (\feed -> { feed | user = Maybe.withDefault feed.user <| getUserFromDict feed }) feeds
+    Decode.succeed toText
+        |> required "id" string
+        |> required "text" string
+        |> required "_created_at" Iso8601.decoder
+        |> required "_user_id" string
+        |> optional "in_reply_to_text_id" string ""
 
 
-replaceAnonymousFeedUser : FeedUser -> String -> FeedUser
-replaceAnonymousFeedUser feedUser anonymousUserId =
-    case feedUser of
-        UserId userId ->
-            if userId == anonymousUserId then
-                UserData Nothing
-
-            else
-                UserId userId
-
-        UserData _ ->
-            feedUser
-
-
-feedsDecoder : Decoder (List Feed)
-feedsDecoder =
-    let
-        toFeed text createdAt userId =
-            Feed text createdAt <| UserId userId
-    in
-    list (Decode.succeed toFeed |> required "text" string |> required "_created_at" Iso8601.decoder |> required "_user_id" string)
-
-
-toFilterUserIdQuery : Maybe FeedUser -> String
-toFilterUserIdQuery user =
-    case user of
-        Just (UserId userId) ->
-            "&$filter=_user_id%20eq%20'" ++ userId ++ "'"
-
-        Just (UserData (Just data)) ->
-            "&$filter=_user_id%20eq%20'" ++ data.id ++ "'"
-
-        _ ->
-            ""
-
-
-getFeeds : Maybe FeedUser -> Maybe Int -> Cmd Msg
-getFeeds user readed =
+getFeeds : Maybe String -> Maybe Int -> Cmd Msg
+getFeeds userId readed =
     let
         skip =
             case readed of
@@ -188,31 +147,23 @@ getFeeds user readed =
 
                 Nothing ->
                     ""
+
+        user =
+            userId
+                |> Maybe.map (\id -> "&$filter=_user_id%20eq%20'" ++ id ++ "'")
+                |> Maybe.withDefault ""
     in
     Http.get
-        { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20" ++ skip ++ toFilterUserIdQuery user
-        , expect = Http.expectJson GotFeeds feedsDecoder
+        { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20" ++ skip ++ user
+        , expect = Http.expectJson GotFeeds textsDecoder
         }
 
 
-getUser : Maybe FeedUser -> Cmd Msg
-getUser user =
-    case user of
-        Just (UserId userId) ->
-            Http.get { url = Routes.baseURL ++ "user/" ++ userId, expect = Http.expectJson (GotUser userId) Users.userDecoder }
-
-        _ ->
-            Cmd.none
-
-
-getCachedUser : Dict String User -> FeedUser -> Maybe User
-getCachedUser users user =
-    case user of
-        UserId userId ->
-            Dict.get userId users
-
-        UserData data ->
-            data
+getUser : Maybe String -> Cmd Msg
+getUser userId =
+    userId
+        |> Maybe.map (\id -> Http.get { url = Routes.baseURL ++ "user/" ++ id, expect = Http.expectJson (GotUser id) Users.userDecoder })
+        |> Maybe.withDefault Cmd.none
 
 
 
@@ -222,18 +173,35 @@ getCachedUser users user =
 view : Model -> Html Msg
 view model =
     div []
-        [ h2 [] [ text <| title model ]
-        , ul [] (List.map (lazy2 viewFeed model.timeZone) model.feeds)
+        [ h2 [] [ text <| pageTitle model ]
+        , ul [] (List.map (lazy4 viewFeed model.timeZone model.texts model.users) model.feeds)
         , button [ disabled <| not model.readableMore, onClick (List.length model.feeds |> GetFeeds) ] [ text "もっと読む" ]
         ]
 
 
-viewFeed : Time.Zone -> Feed -> Html Msg
-viewFeed timeZone feed =
-    li [ onMouseOver <| GetUser feed.user ]
-        [ div [] [ text feed.text, lazy viewUser feed.user ]
+viewFeed : Time.Zone -> Dict String Text -> Dict String User -> Text -> Html Msg
+viewFeed timeZone texts users feed =
+    li [ onMouseOver <| GetUser feed.userId ]
+        [ div [] (viewReplyTo feed.replyTo texts)
+        , div [] [ text feed.text, lazy viewUser (Dict.get feed.userId users) ]
         , div [] [ text <| timeToStr feed.createdAt timeZone ]
         ]
+
+
+viewReplyTo replyTo texts =
+    case replyTo of
+        Just textId ->
+            let
+                reply =
+                    Dict.get textId texts
+
+                attr =
+                    Maybe.withDefault (onMouseOver <| GetFeed textId) <| Maybe.map (\r -> title r.text) reply
+            in
+            [ a [ attr ] [ text <| ">> " ++ textId ++ " への返信" ] ]
+
+        Nothing ->
+            []
 
 
 timeToStr : Time.Posix -> Time.Zone -> String
@@ -308,24 +276,16 @@ timeToStr time timeZone =
     year ++ "/" ++ month ++ "/" ++ day ++ " " ++ hour ++ ":" ++ minute ++ ":" ++ second
 
 
-viewUser : FeedUser -> Html Msg
+viewUser : Maybe User -> Html Msg
 viewUser user =
-    case user of
-        UserData (Just data) ->
-            a [ Routes.href <| Routes.UserFeeds data.id ] [ text <| "(@" ++ data.name ++ ")" ]
-
-        UserData Nothing ->
-            text "(@匿名ユーザー)"
-
-        UserId userId ->
-            text ""
+    user
+        |> Maybe.map (\u -> a [ Routes.href <| Routes.UserFeeds u.id ] [ text <| "(@" ++ u.name ++ ")" ])
+        |> Maybe.withDefault (text "")
 
 
-title : Model -> String
-title model =
-    case model.user of
-        Just (UserData (Just data)) ->
-            data.name ++ "のつぶやき一覧"
-
-        _ ->
-            "つぶやき一覧"
+pageTitle : Model -> String
+pageTitle model =
+    model.userId
+        |> Maybe.andThen (\userId -> Dict.get userId model.users)
+        |> Maybe.map (\user -> user.name ++ "のつぶやき一覧")
+        |> Maybe.withDefault "つぶやき一覧"
