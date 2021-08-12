@@ -89,15 +89,31 @@ update msg model =
             ( model, Cmd.none )
 
         GetFeed textId ->
-            ( model
-            , Http.get
-                { url = Routes.baseURL ++ "text/" ++ textId
-                , expect = Http.expectJson GotFeed textDecoder
-                }
-            )
+            let
+                cmd =
+                    case Dict.get textId model.texts of
+                        Nothing ->
+                            Http.get
+                                { url = Routes.baseURL ++ "text/" ++ textId
+                                , expect = Http.expectJson GotFeed textDecoder
+                                }
+
+                        Just _ ->
+                            Cmd.none
+            in
+            ( model, cmd )
 
         GetUser userId ->
-            ( model, getUser (Just userId) )
+            let
+                cmd =
+                    case Dict.get userId model.users of
+                        Nothing ->
+                            getUser (Just userId)
+
+                        Just _ ->
+                            Cmd.none
+            in
+            ( model, cmd )
 
         GotUser _ (Ok user) ->
             ( { model
@@ -192,13 +208,10 @@ viewReplyTo replyTo texts =
     case replyTo of
         Just textId ->
             let
-                reply =
-                    Dict.get textId texts
-
-                attr =
-                    Maybe.withDefault (onMouseOver <| GetFeed textId) <| Maybe.map (\r -> title r.text) reply
+                showReply =
+                    Dict.get textId texts |> Maybe.map (\r -> [ title r.text ]) |> Maybe.withDefault []
             in
-            [ a [ attr ] [ text <| ">> " ++ textId ++ " への返信" ] ]
+            [ a ((onMouseOver <| GetFeed textId) :: showReply) [ text <| ">> " ++ textId ++ " への返信" ] ]
 
         Nothing ->
             []
