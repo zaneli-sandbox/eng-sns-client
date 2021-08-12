@@ -4,11 +4,13 @@ import Dict exposing (Dict)
 import Html exposing (Html, a, button, div, h2, li, span, text, ul)
 import Html.Attributes exposing (disabled, href)
 import Html.Events exposing (onClick, onMouseOver)
-import Html.Lazy exposing (lazy)
+import Html.Lazy exposing (lazy, lazy2)
 import Http
+import Iso8601
 import Json.Decode as Decode exposing (Decoder, int, list, string)
 import Json.Decode.Pipeline exposing (required)
 import Routes exposing (baseURL)
+import Time
 import Users exposing (User, userDecoder)
 
 
@@ -20,6 +22,7 @@ type alias Model =
     { feeds : List Feed
     , user : Maybe FeedUser
     , users : Dict String User
+    , timeZone : Time.Zone
     , readableMore : Bool
     , notFound : Bool
     }
@@ -27,7 +30,7 @@ type alias Model =
 
 type alias Feed =
     { text : String
-    , createdAt : String
+    , createdAt : Time.Posix
     , user : FeedUser
     }
 
@@ -37,13 +40,13 @@ type FeedUser
     | UserData (Maybe User)
 
 
-init : Maybe String -> ( Model, Cmd Msg )
-init userId =
+init : Time.Zone -> Maybe String -> ( Model, Cmd Msg )
+init timeZone userId =
     let
         user =
             Maybe.map UserId userId
     in
-    ( { feeds = [], user = user, users = Dict.empty, readableMore = False, notFound = False }
+    ( { feeds = [], user = user, users = Dict.empty, timeZone = timeZone, readableMore = False, notFound = False }
     , Cmd.batch
         [ getFeeds user Nothing
         , getUser user
@@ -80,7 +83,7 @@ update msg model =
 
         GetFeeds readed ->
             ( { model | readableMore = False }
-            , getFeeds model.user (Just readed)
+            , getFeeds model.user <| Just readed
             )
 
         GetUser user ->
@@ -136,7 +139,7 @@ replaceFeedUsers feeds users =
                 _ ->
                     Nothing
     in
-    List.map (\feed -> { feed | user = Maybe.withDefault feed.user (getUserFromDict feed) }) feeds
+    List.map (\feed -> { feed | user = Maybe.withDefault feed.user <| getUserFromDict feed }) feeds
 
 
 replaceAnonymousFeedUser : FeedUser -> String -> FeedUser
@@ -157,9 +160,9 @@ feedsDecoder : Decoder (List Feed)
 feedsDecoder =
     let
         toFeed text createdAt userId =
-            Feed text createdAt (UserId userId)
+            Feed text createdAt <| UserId userId
     in
-    list (Decode.succeed toFeed |> required "text" string |> required "_created_at" string |> required "_user_id" string)
+    list (Decode.succeed toFeed |> required "text" string |> required "_created_at" Iso8601.decoder |> required "_user_id" string)
 
 
 toFilterUserIdQuery : Maybe FeedUser -> String
@@ -219,22 +222,97 @@ getCachedUser users user =
 view : Model -> Html Msg
 view model =
     div []
-        [ h2 [] [ text (title model) ]
-        , ul [] (List.map (lazy viewFeed) model.feeds)
-        , button [ disabled (not model.readableMore), onClick (List.length model.feeds |> GetFeeds) ] [ text "もっと読む" ]
+        [ h2 [] [ text <| title model ]
+        , ul [] (List.map (lazy2 viewFeed model.timeZone) model.feeds)
+        , button [ disabled <| not model.readableMore, onClick (List.length model.feeds |> GetFeeds) ] [ text "もっと読む" ]
         ]
 
 
-viewFeed : Feed -> Html Msg
-viewFeed feed =
-    li [ onMouseOver (GetUser feed.user) ] [ div [] [ text feed.text, lazy viewUser feed.user ], div [] [ text feed.createdAt ] ]
+viewFeed : Time.Zone -> Feed -> Html Msg
+viewFeed timeZone feed =
+    li [ onMouseOver <| GetUser feed.user ]
+        [ div [] [ text feed.text, lazy viewUser feed.user ]
+        , div [] [ text <| timeToStr feed.createdAt timeZone ]
+        ]
+
+
+timeToStr : Time.Posix -> Time.Zone -> String
+timeToStr time timeZone =
+    let
+        year =
+            toTimeIntToString Time.toYear
+
+        month =
+            toMonthString
+
+        day =
+            toTimeIntToString Time.toDay |> paddingZero 2
+
+        hour =
+            toTimeIntToString Time.toHour |> paddingZero 2
+
+        minute =
+            toTimeIntToString Time.toMinute |> paddingZero 2
+
+        second =
+            toTimeIntToString Time.toSecond |> paddingZero 2
+
+        toTimeIntToString f =
+            f timeZone time |> String.fromInt
+
+        toMonthString =
+            case Time.toMonth timeZone time of
+                Time.Jan ->
+                    "01"
+
+                Time.Feb ->
+                    "02"
+
+                Time.Mar ->
+                    "03"
+
+                Time.Apr ->
+                    "04"
+
+                Time.May ->
+                    "05"
+
+                Time.Jun ->
+                    "06"
+
+                Time.Jul ->
+                    "07"
+
+                Time.Aug ->
+                    "08"
+
+                Time.Sep ->
+                    "09"
+
+                Time.Oct ->
+                    "10"
+
+                Time.Nov ->
+                    "11"
+
+                Time.Dec ->
+                    "12"
+
+        paddingZero size str =
+            let
+                pad =
+                    size - String.length str
+            in
+            String.fromList (List.repeat pad '0') ++ str
+    in
+    year ++ "/" ++ month ++ "/" ++ day ++ " " ++ hour ++ ":" ++ minute ++ ":" ++ second
 
 
 viewUser : FeedUser -> Html Msg
 viewUser user =
     case user of
         UserData (Just data) ->
-            a [ Routes.UserFeeds data.id |> Routes.href ] [ text ("(@" ++ data.name ++ ")") ]
+            a [ Routes.href <| Routes.UserFeeds data.id ] [ text <| "(@" ++ data.name ++ ")" ]
 
         UserData Nothing ->
             text "(@匿名ユーザー)"

@@ -88,14 +88,14 @@ view model =
     div []
         [ h2 [] [ text title ]
         , ul [] (List.map viewUser model.users)
-        , button [ disabled (not model.readableMore), onClick (List.length model.users |> GetUsers) ] [ text "もっと読む" ]
+        , button [ disabled <| not model.readableMore, onClick (List.length model.users |> GetUsers) ] [ text "もっと読む" ]
         ]
 
 
 viewUser : User -> Html Msg
 viewUser user =
     li []
-        [ div [] [ a [ Routes.UserFeeds user.id |> Routes.href ] [ text user.name ] ]
+        [ div [] [ a [ Routes.href <| Routes.UserFeeds user.id ] [ text user.name ] ]
         , div [] [ text user.description ]
         ]
 

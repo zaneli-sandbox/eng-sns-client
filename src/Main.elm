@@ -6,6 +6,8 @@ import Feeds
 import Html exposing (Html, a, aside, div, h2, li, section, span, text, ul)
 import Html.Attributes exposing (href)
 import Routes
+import Task
+import Time
 import Url exposing (Url)
 import Users
 
@@ -15,12 +17,16 @@ import Users
 
 
 type alias Model =
-    { page : Page, navKey : Navigation.Key }
+    { page : Page, navKey : Navigation.Key, timeZone : Maybe Time.Zone }
 
 
 init : Url -> Navigation.Key -> ( Model, Cmd Msg )
 init url navKey =
-    setNewPage (Routes.match url) (initialModel navKey)
+    let
+        ( initialModel, initialCmd ) =
+            setNewPage (Routes.match url) { page = NotFound, navKey = navKey, timeZone = Nothing }
+    in
+    ( initialModel, Task.attempt (GotTimeZone initialCmd) <| Time.here )
 
 
 type Page
@@ -29,16 +35,13 @@ type Page
     | NotFound
 
 
-initialModel navKey =
-    { page = NotFound, navKey = navKey }
-
-
 
 ---- UPDATE ----
 
 
 type Msg
-    = FeedsMsg Feeds.Msg
+    = GotTimeZone (Cmd Msg) (Result String Time.Zone)
+    | FeedsMsg Feeds.Msg
     | UsersMsg Users.Msg
     | NewRoute (Maybe Routes.Route)
     | Visit UrlRequest
@@ -46,26 +49,35 @@ type Msg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
-    case ( msg, model.page ) of
-        ( FeedsMsg feedsMsg, Feeds feedsModel ) ->
+    case ( msg, model.timeZone, model.page ) of
+        ( GotTimeZone nextCmd (Ok timeZone), _, _ ) ->
+            ( { model | timeZone = Just timeZone }, nextCmd )
+
+        ( GotTimeZone _ (Err _), _, _ ) ->
+            ( { model | timeZone = Just Time.utc }, Cmd.none )
+
+        ( _, Nothing, _ ) ->
+            ( model, Task.attempt (GotTimeZone <| Task.perform (\() -> msg) <| Task.succeed ()) <| Time.here )
+
+        ( FeedsMsg feedsMsg, _, Feeds feedsModel ) ->
             let
                 ( updatedFeedsModel, feedsCmd ) =
                     Feeds.update feedsMsg feedsModel
             in
             ( { model | page = Feeds updatedFeedsModel }, Cmd.map FeedsMsg feedsCmd )
 
-        ( UsersMsg usersMsg, Users usersModel ) ->
+        ( UsersMsg usersMsg, _, Users usersModel ) ->
             let
                 ( updatedUsersModel, usersCmd ) =
                     Users.update usersMsg usersModel
             in
             ( { model | page = Users updatedUsersModel }, Cmd.map UsersMsg usersCmd )
 
-        ( NewRoute route, _ ) ->
+        ( NewRoute route, _, _ ) ->
             setNewPage route model
 
-        ( Visit (Browser.Internal url), _ ) ->
-            ( model, Navigation.pushUrl model.navKey (Url.toString url) )
+        ( Visit (Browser.Internal url), _, _ ) ->
+            ( model, Navigation.pushUrl model.navKey <| Url.toString url )
 
         _ ->
             ( model, Cmd.none )
@@ -73,29 +85,32 @@ update msg model =
 
 setNewPage : Maybe Routes.Route -> Model -> ( Model, Cmd Msg )
 setNewPage route model =
-    case route of
-        Just Routes.AllFeeds ->
+    case ( route, model.timeZone ) of
+        ( routes, Nothing ) ->
+            ( model, Task.attempt (GotTimeZone <| Task.perform NewRoute <| Task.succeed routes) <| Time.here )
+
+        ( Just Routes.AllFeeds, Just timeZone ) ->
             let
                 ( feedsInit, feedsCmd ) =
-                    Feeds.init Nothing
+                    Feeds.init timeZone Nothing
             in
             ( { model | page = Feeds feedsInit }, Cmd.map FeedsMsg feedsCmd )
 
-        Just (Routes.UserFeeds userId) ->
+        ( Just (Routes.UserFeeds userId), Just timeZone ) ->
             let
                 ( feedsInit, feedsCmd ) =
-                    Feeds.init (Just userId)
+                    Feeds.init timeZone <| Just userId
             in
             ( { model | page = Feeds feedsInit }, Cmd.map FeedsMsg feedsCmd )
 
-        Just Routes.Users ->
+        ( Just Routes.Users, _ ) ->
             let
                 ( usersInit, usersCmd ) =
                     Users.init
             in
             ( { model | page = Users usersInit }, Cmd.map UsersMsg usersCmd )
 
-        Nothing ->
+        ( Nothing, _ ) ->
             ( { model | page = NotFound }, Cmd.none )
 
 
