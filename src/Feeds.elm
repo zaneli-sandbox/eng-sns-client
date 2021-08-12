@@ -1,8 +1,10 @@
 module Feeds exposing (Model, Msg(..), init, title, update, view)
 
+import Dict exposing (Dict)
 import Html exposing (Html, a, button, div, h2, li, span, text, ul)
 import Html.Attributes exposing (disabled, href)
 import Html.Events exposing (onClick, onMouseOver)
+import Html.Lazy exposing (lazy)
 import Http
 import Json.Decode as Decode exposing (Decoder, int, list, string)
 import Json.Decode.Pipeline exposing (required)
@@ -15,11 +17,19 @@ import Users exposing (User, userDecoder)
 
 
 type alias Model =
-    { feeds : List Feed, user : Maybe FeedUser, readableMore : Bool, notFound : Bool }
+    { feeds : List Feed
+    , user : Maybe FeedUser
+    , users : Dict String User
+    , readableMore : Bool
+    , notFound : Bool
+    }
 
 
 type alias Feed =
-    { text : String, createdAt : String, user : FeedUser }
+    { text : String
+    , createdAt : String
+    , user : FeedUser
+    }
 
 
 type FeedUser
@@ -33,7 +43,7 @@ init userId =
         user =
             Maybe.map UserId userId
     in
-    ( { feeds = [], user = user, readableMore = False, notFound = False }
+    ( { feeds = [], user = user, users = Dict.empty, readableMore = False, notFound = False }
     , Cmd.batch
         [ getFeeds user Nothing
         , getUser user
@@ -56,7 +66,7 @@ update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         GotFeeds (Ok feeds) ->
-            ( { model | feeds = model.feeds ++ feeds, readableMore = True }, Cmd.none )
+            ( { model | feeds = model.feeds ++ replaceFeedUsers feeds model.users, readableMore = True }, Cmd.none )
 
         GotFeeds (Err (Http.BadStatus 404)) ->
             if List.isEmpty model.feeds then
@@ -74,10 +84,25 @@ update msg model =
             )
 
         GetUser user ->
-            ( model, getUser (Just user) )
+            let
+                updatedModel =
+                    case getCachedUser model.users user of
+                        Just cachedUser ->
+                            { model | feeds = List.map (\feed -> { feed | user = replaceFeedUser feed.user cachedUser }) model.feeds }
+
+                        Nothing ->
+                            model
+            in
+            ( updatedModel, getUser (Just user) )
 
         GotUser _ (Ok user) ->
-            ( { model | feeds = List.map (\feed -> { feed | user = replaceFeedUser feed.user user }) model.feeds, user = Maybe.map (\u -> replaceFeedUser u user) model.user }, Cmd.none )
+            ( { model
+                | feeds = List.map (\feed -> { feed | user = replaceFeedUser feed.user user }) model.feeds
+                , user = Maybe.map (\u -> replaceFeedUser u user) model.user
+                , users = Dict.insert user.id user model.users
+              }
+            , Cmd.none
+            )
 
         GotUser userId (Err (Http.BadStatus 404)) ->
             ( { model | feeds = List.map (\feed -> { feed | user = replaceAnonymousFeedUser feed.user userId }) model.feeds }, Cmd.none )
@@ -98,6 +123,20 @@ replaceFeedUser feedUser user =
 
         UserData _ ->
             feedUser
+
+
+replaceFeedUsers : List Feed -> Dict String User -> List Feed
+replaceFeedUsers feeds users =
+    let
+        getUserFromDict feed =
+            case feed.user of
+                UserId userId ->
+                    Dict.get userId users |> Maybe.map (\u -> UserData (Just u))
+
+                _ ->
+                    Nothing
+    in
+    List.map (\feed -> { feed | user = Maybe.withDefault feed.user (getUserFromDict feed) }) feeds
 
 
 replaceAnonymousFeedUser : FeedUser -> String -> FeedUser
@@ -163,6 +202,16 @@ getUser user =
             Cmd.none
 
 
+getCachedUser : Dict String User -> FeedUser -> Maybe User
+getCachedUser users user =
+    case user of
+        UserId userId ->
+            Dict.get userId users
+
+        UserData data ->
+            data
+
+
 
 ---- VIEW ----
 
@@ -171,14 +220,14 @@ view : Model -> Html Msg
 view model =
     div []
         [ h2 [] [ text (title model) ]
-        , ul [] (List.map viewFeed model.feeds)
+        , ul [] (List.map (lazy viewFeed) model.feeds)
         , button [ disabled (not model.readableMore), onClick (List.length model.feeds |> GetFeeds) ] [ text "もっと読む" ]
         ]
 
 
 viewFeed : Feed -> Html Msg
 viewFeed feed =
-    li [ onMouseOver (GetUser feed.user) ] [ div [] [ text feed.text, viewUser feed.user ], div [] [ text feed.createdAt ] ]
+    li [ onMouseOver (GetUser feed.user) ] [ div [] [ text feed.text, lazy viewUser feed.user ], div [] [ text feed.createdAt ] ]
 
 
 viewUser : FeedUser -> Html Msg
