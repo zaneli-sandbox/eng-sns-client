@@ -94,10 +94,7 @@ update msg model =
                 cmd =
                     case Dict.get textId model.texts of
                         Nothing ->
-                            Http.get
-                                { url = Routes.baseURL ++ "text/" ++ textId
-                                , expect = Http.expectJson GotFeed textDecoder
-                                }
+                            getFeed textId
 
                         Just _ ->
                             Cmd.none
@@ -173,6 +170,13 @@ getFeeds userId readed =
     Http.get
         { url = Routes.baseURL ++ "text/all?$orderby=_created_at%20desc&$limit=20" ++ skip ++ user
         , expect = Http.expectJson GotFeeds textsDecoder
+        }
+
+
+getFeed textId =
+    Http.get
+        { url = Routes.baseURL ++ "text/" ++ textId
+        , expect = Http.expectJson GotFeed textDecoder
         }
 
 
