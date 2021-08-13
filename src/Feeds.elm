@@ -1,5 +1,6 @@
 module Feeds exposing (Model, Msg(..), init, pageTitle, update, view)
 
+import DateFormat
 import Dict exposing (Dict)
 import Html exposing (Html, a, button, div, h2, li, span, text, ul)
 import Html.Attributes exposing (disabled, href, title)
@@ -199,8 +200,8 @@ viewFeed : Time.Zone -> Dict String Text -> Dict String User -> Text -> Html Msg
 viewFeed timeZone texts users feed =
     li [ onMouseOver <| GetUser feed.userId ]
         [ div [] (viewReplyTo feed.replyTo texts)
-        , div [] [ text feed.text, lazy viewUser (Dict.get feed.userId users) ]
-        , div [] [ text <| timeToStr feed.createdAt timeZone ]
+        , div [] [ text feed.text, lazy viewUser <| Dict.get feed.userId users ]
+        , div [] [ text <| timeFormatter timeZone feed.createdAt ]
         ]
 
 
@@ -217,76 +218,21 @@ viewReplyTo replyTo texts =
             []
 
 
-timeToStr : Time.Posix -> Time.Zone -> String
-timeToStr time timeZone =
-    let
-        year =
-            toTimeIntToString Time.toYear
-
-        month =
-            toMonthString
-
-        day =
-            toTimeIntToString Time.toDay |> paddingZero 2
-
-        hour =
-            toTimeIntToString Time.toHour |> paddingZero 2
-
-        minute =
-            toTimeIntToString Time.toMinute |> paddingZero 2
-
-        second =
-            toTimeIntToString Time.toSecond |> paddingZero 2
-
-        toTimeIntToString f =
-            f timeZone time |> String.fromInt
-
-        toMonthString =
-            case Time.toMonth timeZone time of
-                Time.Jan ->
-                    "01"
-
-                Time.Feb ->
-                    "02"
-
-                Time.Mar ->
-                    "03"
-
-                Time.Apr ->
-                    "04"
-
-                Time.May ->
-                    "05"
-
-                Time.Jun ->
-                    "06"
-
-                Time.Jul ->
-                    "07"
-
-                Time.Aug ->
-                    "08"
-
-                Time.Sep ->
-                    "09"
-
-                Time.Oct ->
-                    "10"
-
-                Time.Nov ->
-                    "11"
-
-                Time.Dec ->
-                    "12"
-
-        paddingZero size str =
-            let
-                pad =
-                    size - String.length str
-            in
-            String.fromList (List.repeat pad '0') ++ str
-    in
-    year ++ "/" ++ month ++ "/" ++ day ++ " " ++ hour ++ ":" ++ minute ++ ":" ++ second
+timeFormatter : Time.Zone -> Time.Posix -> String
+timeFormatter =
+    DateFormat.format
+        [ DateFormat.yearNumber
+        , DateFormat.text "/"
+        , DateFormat.monthFixed
+        , DateFormat.text "/"
+        , DateFormat.dayOfMonthFixed
+        , DateFormat.text " "
+        , DateFormat.hourMilitaryFixed
+        , DateFormat.text ":"
+        , DateFormat.minuteFixed
+        , DateFormat.text ":"
+        , DateFormat.secondFixed
+        ]
 
 
 viewUser : Maybe User -> Html Msg
